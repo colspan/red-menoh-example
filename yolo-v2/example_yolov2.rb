@@ -7,28 +7,34 @@ require 'rmagick'
 def decode(out, anchors, n_fg_class, thresh)
   out_h = out[0].length
   out_w = out[0][0].length
-  out = NArray[*out].reshape(anchors.length, 4 + 1 + n_fg_class, out_h, out_w)
   score = nil
+  # reshape
+  out = out.each_slice(4 + 1 + n_fg_class).to_a
   bbox = []
   (0...out_h).each do |y|
     (0...out_w).each do |x|
       (0...anchors.length).each do |a|
-        loc = out[a, 0...4, y, x]
-        obj = out[a, 4, y, x]
-        conf = out[a, (4 + 1)...(out.shape[1]), y, x]
+        # WIP still broken value
+        obj = out[a][4][y][x]
+        conf = out[a][(4 + 1)...(4 + 1 + n_fg_class)]
 
-        anc_y = y.to_f + sigmoid(loc[0])
-        anc_x = x.to_f + sigmoid(loc[1])
-        # WIP TODO broken anchor for h and w
-        p [loc[2], NMath.exp(loc[2])]
-        anc_h = anchors[a][0] * NMath.exp(loc[2])
-        anc_w = anchors[a][1] * NMath.exp(loc[3])
+        anc_y = y.to_f + sigmoid(out[a][0][y][x])
+        anc_x = x.to_f + sigmoid(out[a][1][y][x])
+        p [out[a][2][y][x], Math.exp(out[a][2][y][x])]
+        anc_h = anchors[a][0] * Math.exp(out[a][2][y][x])
+        anc_w = anchors[a][1] * Math.exp(out[a][3][y][x])
 
+        p obj
         obj = sigmoid(obj)
-        score = NMath.exp(conf)
-        score = score * obj / score.sum
+        p obj
+        score = conf.map { |d| Math.exp(d[y][x]) }
+        sum = score.inject(:+)
+        # p sum
+        score.map! { |d| d * obj / sum }
+        # p score
         (0...n_fg_class).each do |lb|
           next unless score[lb] >= thresh
+
           bbox.push(
             top: (anc_y - anc_h / 2.0) / out_h.to_f,
             left: (anc_x - anc_w / 2.0) / out_w.to_f,
@@ -45,7 +51,7 @@ def decode(out, anchors, n_fg_class, thresh)
 end
 
 def sigmoid(x)
-  1. / (1. + NMath.exp(-x))
+  1. / (1. + Math.exp(-x))
 end
 
 def suppress(bboxes, thresh)
@@ -116,7 +122,7 @@ image_set = [
       image = Magick::Image.read(image_filepath).first
       image = image.resize_to_fill(input_shape[:width], input_shape[:height])
       'BGR'.split('').map do |color|
-        image.export_pixels(0, 0, image.columns, image.rows, color).map { |pix| pix / 256 }
+        image.export_pixels(0, 0, image.columns, image.rows, color).map { |pix| pix / 65_536 }
       end.flatten
     end.flatten
   }
@@ -132,11 +138,16 @@ layer_result[:data].zip(image_list, image_set.first[:data]).each do |image_resul
   bboxes = decode(image_result, config['anchors'], config['label_names'].length, 0.5)
   bboxes = suppress(bboxes, 0.45)
   bboxes.each do |bbox|
-    # p [bbox[:score], config['label_names'][bbox[:label]]]
-    # p [bbox[:top], bbox[:left], bbox[:bottom], bbox[:right]]
+    p [bbox[:score], config['label_names'][bbox[:label]]]
+    p [bbox[:top], bbox[:left], bbox[:bottom], bbox[:right]]
     draw = Magick::Draw.new
     draw.fill('#ffffff')
-    draw.rectangle(bbox[:top], bbox[:left], bbox[:bottom], bbox[:right])
+    draw.rectangle(
+      bbox[:top] / 13.0 * input_shape[:height] + input_shape[:height] / 2.0,
+      bbox[:left] / 13.0 * input_shape[:width] + input_shape[:width] / 2.0,
+      bbox[:bottom] / 13.0 * input_shape[:height] + input_shape[:height] / 2.0,
+      bbox[:right] / 13.0 * input_shape[:width] + input_shape[:width] / 2.0
+    )
     draw.draw(image_buffer)
   end
   image_buffer.write(image_filepath + 'out.png')
