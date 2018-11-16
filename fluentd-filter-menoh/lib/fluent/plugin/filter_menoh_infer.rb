@@ -95,7 +95,53 @@ module Fluent
       @model = @onnx_obj.make_model @model_opt
     end
 
-    def postprocess_mnist(es, detected_results)
+    def preprocess_mnist(es)
+      batch = []
+      meta = []
+      es.each do |time, record|
+        image = image.resize_to_fill(@input_shape[:width], @input_shape[:height])
+        batch << image.export_pixels(0, 0, image.columns, image.rows, "i").map { |pix| pix / 256 } # for MNIST
+        meta << {
+          time: time
+        }
+      end
+      image_set = [
+        {
+          name: MNIST_IN_NAME,
+          data: batch.flatten
+        }
+      ]
+      [image_set, meta]
+    end
+
+    def preprocess_vgg(es)
+      batch = []
+      meta = []
+      es.each do |time, record|
+        img_base64 = JSON.load(record["message"])["img"].gsub("data:image/jpeg;base64,", "")
+        image = Magick::Image.read_inline(img_base64).first
+        image = image.resize_to_fill(@input_shape[:width], @input_shape[:height])
+        batch << 'RGB'.split('').map do |color|
+          image.export_pixels(0, 0, image.columns, image.rows, color).map do |pix|
+            pix / 256 - @rgb_offset[color.to_sym]
+          end
+        end.flatten
+        meta << {
+          time: time
+        }
+      end
+      image_set = [
+        {
+          name: CONV1_1_IN_NAME,
+          data: batch.flatten
+        }
+      ]
+      [image_set, meta]
+    end
+
+
+    def postprocess_mnist(meta, detected_results)
+      new_es = MultiEventStream.new
       top_k = 1
       output = []
       layer_result = detected_results.find { |x| x[:name] == MNIST_OUT_NAME }
@@ -111,57 +157,37 @@ module Fluent
       output
     end
 
-    def postprocess_vgg(es, detected_results)
+    def postprocess_vgg(meta, detected_results)
+      new_es = MultiEventStream.new
       top_k = 5
-      output = []
       layer_result = detected_results.find { |x| x[:name] == SOFTMAX_OUT_NAME }
-      layer_result[:data].zip(es).each do |image_result, image_filepath|
+      layer_result[:data].zip(meta).each do |image_result, m|
         # sort by score
         sorted_result = image_result.zip(@categories).sort_by { |x| -x[0] }
         # display result
         result = []
-        sorted_result[0, top_k].each do |score, category|
-          result << {category: category, score: score}
+        sorted_result[0...top_k].each do |score, category|
+          result << {time: m[:time], category: category, score: score}
         end
-        p result[0]
-        output << JSON.dump(result)
+        new_es.add(m[:time], result)
       end
-      output
+      new_es
     end
 
     def filter_stream(tag, es)
-      new_es = MultiEventStream.new
-
-      # begin
+      new_es = nil
+      begin
         # prepare dataset
-        data = []
-        es.each do |time, record|
-          img_base64 = JSON.load(record["message"])["img"].gsub("data:image/jpeg;base64,", "")
-          image = Magick::Image.read_inline(img_base64).first
-          image = image.resize_to_fill(@input_shape[:width], @input_shape[:height])
-          #data << image.export_pixels(0, 0, image.columns, image.rows, "i").map { |pix| pix / 256 } # for MNIST
-          data << 'RGB'.split('').map do |color|
-            image.export_pixels(0, 0, image.columns, image.rows, color).map do |pix|
-              pix / 256 - @rgb_offset[color.to_sym]
-            end
-          end.flatten
-        end
-        image_set = [
-          {
-            # name: MNIST_IN_NAME, # for MNIST
-            name: CONV1_1_IN_NAME, # for VGG
-            data: data.flatten,
-          },
-        ]
+        image_set, meta = preprocess_vgg(es)
 
         # execute inference
         detected_results = @model.run image_set
 
         # postprocess_mnist(es, detected_results)
-        postprocess_vgg(es, detected_results)
-      # rescue StandardError => e
-        # router.emit_error_event(tag, time, record, e) # TODO 仕様チェック
-      # end
+        new_es = postprocess_vgg(meta, detected_results)
+      rescue StandardError => e
+        router.emit_error_event(tag, nil, nil, e)
+      end
       new_es
     end
   end
