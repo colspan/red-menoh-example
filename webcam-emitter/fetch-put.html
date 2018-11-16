@@ -1,6 +1,85 @@
 <html>
+    <head>
+        <style>
+            body{
+                background: #cecece;
+            }
+            #video-cropper {
+                height: 640px;
+                width: 640px;
+                overflow: hidden;
+                margin: 0 20px 0 20px;
+                float: left;
+            }
+    
+            #video {
+                width: auto;
+                height: 100%;
+                transform: translate(-128px, 0);
+                transform: scale(-1, 1);
+            }
+    
+            #canvas-live-buffer {
+                display: none;
+            }
+    
+            #realtime-view-container {
+                background: #50aaff;
+                position: absolute;
+                width: 1300px;
+                height: 715px;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            }
+            #realtime-view-container h1{
+                color:white;
+                font-size: 24pt;
+                text-align: center;
+                margin: 2px;
+                padding: 0;
+            }
+    
+            #detected-result-container {
+                box-shadow: 0 0 30px rgba(0,0,0,0.8) inset;
+                display: table;
+                background: #eeeeee;
+                width: 580px;
+                height: 620px;
+                margin: 0 auto;
+                padding: 10px;
+                float: left;
+            }
+    
+            .detected-category {
+                text-align: left;
+                color: #303080;
+                line-height: 28pt;
+                font-size: 28pt;
+                font-weight: bold;
+                margin: 10px 0 0 0;
+                padding: 0;
+            }
+    
+            .detected-score {
+                text-align: left;
+                margin: 10px;
+                color: #303030;
+            }
+        </style>
+    </head>
     <body>
-        <video id="video"></video>
+        <div id="realtime-view-container">
+            <h1>VGG16 inference powered by Fluentd and Menoh-Ruby</h1>
+            <div id="video-cropper">
+                <video id="video"></video>
+            </div>
+            <div id="detected-result-container">
+            </div>
+        </div>
+            
+
         <canvas id="video-buffer" width=640 height=480 style="display:none"></canvas>
         <script src="script.js"></script>
     </body>

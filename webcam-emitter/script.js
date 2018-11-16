@@ -31,7 +31,7 @@ function captureFrame() {
 
 function putImage() {
   var dataURL = captureFrame()
-  fetch("http://localhost:9880/binary", {
+  fetch("http://localhost:9880/vgg16", {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
     credentials: "same-origin", // include, same-origin, *omit
@@ -41,4 +41,31 @@ function putImage() {
 
 setInterval(putImage, 1000)
 
-// 'data:image/jpeg;base64,'
+var connection = new WebSocket('ws://localhost:8080');
+
+var detectedDisplayElems = [];
+connection.onopen = function () {
+  var resultContainerElem = document.getElementById('detected-result-container');
+  for(var i = 0; i<5; i++){
+    var detectedCategoryElem = document.createElement('div');
+    detectedCategoryElem.classList.add('detected-category');
+    resultContainerElem.appendChild(detectedCategoryElem);
+
+    var detectedScoreElem = document.createElement('div');
+    detectedScoreElem.classList.add('detected-score');
+    resultContainerElem.appendChild(detectedScoreElem);
+    detectedDisplayElems.push({
+      category: detectedCategoryElem,
+      score: detectedScoreElem
+    });
+  }
+};
+
+connection.onmessage = function (e) {
+  var data =JSON.parse(e.data)[1];
+  for(var i=0;i<5;i++){
+    ['category', 'score'].forEach(elem=>{
+      detectedDisplayElems[i][elem].innerHTML = data[i][elem];
+    })
+  }
+};
