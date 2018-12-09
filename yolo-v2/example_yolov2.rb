@@ -7,14 +7,14 @@ require 'rmagick'
 # https://qiita.com/shima_x/items/79f4fd33d24ea338d8b2
 def resize_and_pad(image, width, height)
   # change_geometryを通さないとpaddingが効いてくれない
-  image.change_geometry("#{width}x#{height}") do |cols,rows,img|
+  image.change_geometry("#{width}x#{height}") do |cols, rows, img|
     # !を付けると破壊的にimgを上書きする
-    img.resize_to_fit!(cols,rows)
+    output = img.resize_to_fit(cols, rows)
     # 背景色を白にする
-    img.background_color = '#808080'
+    output.background_color = '#808080'
     # ImageMagickの仕様で位置合わせの座標にマイナスが付与される
     # そのため第3, 第4引数にはマイナスを付ける必要がある
-    img.extent(width, height, -(width-cols)/2, -(height-rows)/2)
+    output.extent(width, height, -(width - cols) / 2, -(height - rows) / 2)
   end
 end
 
@@ -28,7 +28,6 @@ def decode(out, anchors, n_fg_class, thresh)
   (0...out_h).each do |y|
     (0...out_w).each do |x|
       (0...anchors.length).each do |a|
-        # WIP still broken value
         obj = out[a][4][y][x]
         conf = out[a][(4 + 1)...(4 + 1 + n_fg_class)]
         anc_y = y.to_f + sigmoid(out[a][0][y][x])
@@ -92,8 +91,8 @@ config = JSON.load(File.open('./data/yolo_v2_voc0712.json', 'r').read)
 
 # load dataset
 image_list = [
-  # './data/Light_sussex_hen.jpg',
-  # './data/honda_nsx.jpg',
+  './data/Light_sussex_hen.jpg',
+  './data/honda_nsx.jpg',
   './data/dog.jpg'
 ]
 input_shape = {
@@ -144,27 +143,35 @@ inferenced_results = model.run image_set
 layer_result = (inferenced_results.find { |x| x[:name] == config['output'] })
 layer_result[:data].zip(image_list, image_set.first[:data]).each do |image_result, image_filepath|
   puts "=== Result for #{image_filepath} ==="
-  image_buffer = Magick::Image.read(image_filepath).first
-  image_buffer = resize_and_pad(image_buffer, input_shape[:width], input_shape[:height])
-  org_w = image_buffer.columns
-  org_h = image_buffer.rows
-  p [org_w, org_h]
-  scale = 128#/org_w.to_f# / 13.0
-  p scale
+  # read original image
+  img_org = Magick::Image.read(image_filepath).first
+  org_w = img_org.columns.to_f
+  org_h = img_org.rows.to_f
+
+  # calculate scale
+  scale = [
+    org_w / input_shape[:width],
+    org_h / input_shape[:height]
+  ].max
+  scale_w = input_shape[:width] * scale
+  scale_h = input_shape[:height] * scale
+
+  # decode
   bboxes = decode(image_result, config['anchors'], config['label_names'].length, 0.5)
   bboxes = suppress(bboxes, 0.45)
   bboxes.each do |bbox|
     p [bbox[:score], config['label_names'][bbox[:label]]]
-    p [bbox[:top], bbox[:left], bbox[:bottom], bbox[:right]]
+    # p [bbox[:top], bbox[:left], bbox[:bottom], bbox[:right]]
     draw = Magick::Draw.new
-    draw.fill('#ffffff')
+    draw.stroke('#ffff00')
+    draw.fill('Transparent')
     draw.rectangle(
-      bbox[:top] * scale + org_h / 2.0,
-      bbox[:left] * scale + org_w / 2.0,
-      bbox[:bottom] * scale + org_h / 2.0,
-      bbox[:right] * scale + org_w / 2.0
+      (bbox[:left] - 0.5) * scale_w + org_w / 2.0,
+      (bbox[:top] - 0.5) * scale_h + org_h / 2.0,
+      (bbox[:right] - 0.5) * scale_w + org_w / 2.0,
+      (bbox[:bottom] - 0.5) * scale_h + org_h / 2.0
     )
-    draw.draw(image_buffer)
+    draw.draw(img_org)
   end
-  image_buffer.write(image_filepath + 'out.png')
+  img_org.write(image_filepath + '_out.png')
 end
